@@ -63,6 +63,7 @@
   <div class="row">
     <label class="btn" for="files">Load beats</label>
     <input type="file" id="files" accept="audio/*" multiple>
+    <button id="presetsBtn">Try presets</button>
     <button id="prev">&#9664;&#9664;</button>
     <button id="play">Play</button>
     <button id="next">&#9654;&#9654;</button>
@@ -94,6 +95,7 @@
   const listEl = document.getElementById('list');
   const title = document.getElementById('title');
   const glow = document.getElementById('glow');
+  const presetsBtn = document.getElementById('presetsBtn');
 
   const CY = 0.52;   // vertical center of the circle / wave / glow (title sits above it)
 
@@ -143,10 +145,14 @@
   let shuffle = false;
   let history = [];
 
-  // Optional: for hosting. Put mp3s in a "beats" folder next to this file, then list them here.
-  // Example: const AUTO_BEATS = ['beats/first-beat.mp3', 'beats/second-beat.mp3'];
-  // Only works when hosted online (GitHub Pages etc.), not when opened by double-click.
-  const AUTO_BEATS = [];
+  // Preset beats that ship with the site. Put your mp3s in a "beats/" folder
+  // next to this file, then list the exact filenames here.
+  // Only YOU can change this list (it's your repo), so visitors can only play what you upload.
+  const AUTO_BEATS = [
+    'beats/beatjelefir.mp3',
+    'beats/jhele3.mp3',
+    'beats/yeatbeat.mp3'
+  ];
 
   function addFiles(list) {
     const files = Array.from(list).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name));
@@ -251,11 +257,48 @@
     shuffleBtn.textContent = shuffle ? 'Shuffle: on' : 'Shuffle';
   }
 
+  // ---------- presets ----------
+  let presetCycle = -1;
+  function playPresets() {
+    if (!AUTO_BEATS.length) { alert('No presets configured. Add files to the AUTO_BEATS list.'); return; }
+    // Re-add any preset that was removed
+    const present = new Set(tracks.map(t => t.url));
+    AUTO_BEATS.forEach(url => {
+      if (!present.has(url)) {
+        tracks.push({ name: url.split('/').pop().replace(/\.[^.]+$/, ''), url });
+      }
+    });
+    presetCycle = (presetCycle + 1) % AUTO_BEATS.length;
+    const target = AUTO_BEATS[presetCycle];
+    const idx = tracks.findIndex(t => t.url === target);
+    if (idx >= 0) { hint.style.display = 'none'; loadTrack(idx, true); }
+  }
+  presetsBtn.addEventListener('click', playPresets);
+
   if (AUTO_BEATS.length) {
     tracks = AUTO_BEATS.map(p => ({ name: p.split('/').pop().replace(/\.[^.]+$/, ''), url: p }));
     hint.textContent = 'PICK A BEAT TO BEGIN';
     renderList();
+    console.log('[VSLZR] Loaded', AUTO_BEATS.length, 'preset(s):', AUTO_BEATS);
   }
+
+  // Quietly verify each preset actually exists and is playable
+  (async function verifyPresets() {
+    let ok = 0, fail = 0;
+    for (const url of AUTO_BEATS) {
+      const good = await new Promise(resolve => {
+        const a = new Audio();
+        a.preload = 'metadata';
+        const t = setTimeout(() => resolve(false), 5000);
+        a.onloadedmetadata = () => { clearTimeout(t); resolve(true); };
+        a.onerror = () => { clearTimeout(t); resolve(false); };
+        a.src = url;
+      });
+      if (good) ok++;
+      else { fail++; console.warn('[VSLZR] ⚠ Preset missing or unplayable:', url); }
+    }
+    if (AUTO_BEATS.length) console.log(`[VSLZR] Preset check: ${ok} OK, ${fail} missing`);
+  })();
 
   // ---------- audio analysis ----------
   let audioCtx, analyser, gainNode, recDest, freq, wave;
@@ -281,9 +324,12 @@
   }
 
   function startPlayback() {
+    hint.style.display = 'none';
     setupAudio();
     audioCtx.resume();
-    audio.play().catch(() => {});
+    audio.play().catch(err => {
+      console.warn('[VSLZR] Play failed:', err.name, '— src:', audio.getAttribute('src'));
+    });
   }
 
   function togglePlay() {
@@ -422,6 +468,14 @@
 
   audio.addEventListener('play', () => playBtn.textContent = 'Pause');
   audio.addEventListener('pause', () => playBtn.textContent = 'Play');
+  audio.addEventListener('error', () => {
+    const e = audio.error;
+    if (!e) return;
+    const reasons = { 1: 'aborted', 2: 'network error', 3: 'decode error', 4: 'source not supported' };
+    const src = (audio.getAttribute('src') || '').split('/').pop() || '?';
+    trackName.textContent = '⚠ ' + src + ' — ' + (reasons[e.code] || 'failed to load');
+    console.warn('[VSLZR] Audio error:', e.code, reasons[e.code], '→', audio.src);
+  });
   audio.addEventListener('ended', () => {
     if (recording) {
       clearTimeout(recStopTimer);

@@ -7,18 +7,27 @@
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { background:#050507; color:#eee; font-family:sans-serif; overflow:hidden; height:100vh; }
-  #glow { position:fixed; left:50%; top:52%; width:90vmin; height:90vmin; margin:-45vmin 0 0 -45vmin; border-radius:50%;
+
+  /* the stage = everything that gets recorded (full screen, or a 9:16 phone shape) */
+  #stage { position:fixed; top:0; bottom:0; left:50%; width:100%; transform:translateX(-50%); overflow:hidden; }
+  body.portrait #stage { width:min(100vw, calc(100vh * 9 / 16)); background:#050507; box-shadow:0 0 0 1px #222; }
+
+  .bgm { position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .5s; pointer-events:none; }
+  .bgm.show { opacity:.42; }
+
+  #glow { position:absolute; left:50%; top:52%; width:90vmin; height:90vmin; margin:-45vmin 0 0 -45vmin; border-radius:50%;
           background:radial-gradient(circle, rgba(120,60,255,.55), rgba(120,60,255,0) 65%);
           opacity:.15; will-change:transform, opacity; pointer-events:none; }
-  canvas { position:fixed; inset:0; width:100%; height:100%; }
-  #title { position:fixed; left:50%; top:9%; transform:translate(-50%,-50%);
+  canvas#c { position:absolute; inset:0; width:100%; height:100%; }
+  #title { position:absolute; left:50%; top:9%; transform:translate(-50%,-50%);
            font-family:'Segoe UI','Helvetica Neue',Arial,sans-serif; font-weight:800;
-           font-size:clamp(34px, 9vmin, 110px); letter-spacing:.22em; text-indent:.22em; white-space:nowrap;
+           font-size:60px; letter-spacing:.22em; text-indent:.22em; white-space:nowrap;
            background:linear-gradient(90deg, var(--t1, #fff), var(--t2, #b99bff));
            -webkit-background-clip:text; background-clip:text;
            color:transparent; -webkit-text-fill-color:transparent;
            filter:drop-shadow(0 0 18px var(--tg, rgba(120,60,255,.55)));
            pointer-events:none; will-change:transform; }
+
   #hint { position:fixed; top:60%; left:50%; transform:translateX(-50%); opacity:.4; letter-spacing:4px; font-size:13px; pointer-events:none; text-align:center; }
   #list { position:fixed; top:16px; left:16px; font-size:12px; letter-spacing:2px; opacity:.85; max-height:55vh; overflow:auto; z-index:5; }
   #list div { display:flex; align-items:center; gap:10px; cursor:pointer; padding:5px 10px; border-radius:6px; min-width:230px; }
@@ -33,6 +42,7 @@
   #ui { position:fixed; left:0; right:0; bottom:0; padding:24px; display:flex; flex-direction:column; align-items:center; gap:12px;
         background:linear-gradient(transparent, rgba(0,0,0,.75)); }
   #track { letter-spacing:5px; font-weight:300; font-size:14px; opacity:.85; min-height:18px; }
+  #bpm { letter-spacing:4px; font-size:11px; opacity:.5; min-height:14px; margin-top:-8px; }
   #seek { width:min(600px, 90%); accent-color:#9b6bff; }
   #vol { width:80px; accent-color:#9b6bff; }
   #keys { font-size:11px; letter-spacing:2px; opacity:.3; text-align:center; }
@@ -43,26 +53,34 @@
   button.rec { border-color:#ff3b5c; color:#ff3b5c; }
   input[type=file] { display:none; }
   #drop { position:fixed; inset:0; display:none; align-items:center; justify-content:center; background:rgba(5,5,7,.82);
-          border:2px dashed #9b6bff; letter-spacing:8px; font-size:18px; z-index:50; pointer-events:none; }
+          border:2px dashed #9b6bff; letter-spacing:8px; font-size:18px; z-index:50; pointer-events:none; text-align:center; }
   body.dragging #drop { display:flex; }
   body.clean #ui, body.clean #list, body.clean #hint { display:none; }
 </style>
 </head>
 <body>
 
-<div id="glow"></div>
-<canvas id="c"></canvas>
-<div id="title">VSLZR</div>
-<div id="hint">LOAD OR DROP YOUR BEATS TO BEGIN</div>
+<div id="stage">
+  <video id="audio" class="bgm" playsinline></video>
+  <img id="cover" class="bgm" alt="">
+  <div id="glow"></div>
+  <canvas id="c"></canvas>
+  <div id="title">VSLZR</div>
+</div>
+
+<div id="hint">LOAD OR DROP YOUR BEATS (MP3 OR MP4) TO BEGIN</div>
 <div id="list"></div>
-<div id="drop">DROP BEATS HERE</div>
+<div id="drop">DROP BEATS (MP3 / MP4) OR A COVER IMAGE</div>
 
 <div id="ui">
   <div id="track"></div>
+  <div id="bpm"></div>
   <input type="range" id="seek" min="0" max="1000" value="0">
   <div class="row">
     <label class="btn" for="files">Load beats</label>
-    <input type="file" id="files" accept="audio/*" multiple>
+    <input type="file" id="files" accept="audio/*,video/*" multiple>
+    <label class="btn" for="coverFile">Cover</label>
+    <input type="file" id="coverFile" accept="image/*">
     <button id="presetsBtn">Try presets</button>
     <button id="prev">&#9664;&#9664;</button>
     <button id="play">Play</button>
@@ -70,47 +88,70 @@
     <button id="shuffleBtn">Shuffle</button>
     <button id="modeBtn">bars</button>
     <button id="themeBtn">theme</button>
+    <button id="fmtBtn">16:9</button>
     <button id="recBtn">&#9679; Record</button>
     <button id="fs">Fullscreen</button>
     <input type="range" id="vol" min="0" max="1" step="0.01" value="1" title="Volume">
   </div>
-  <div id="keys">SPACE PLAY &nbsp;·&nbsp; M STYLE &nbsp;·&nbsp; T THEME &nbsp;·&nbsp; S SHUFFLE &nbsp;·&nbsp; H HIDE UI &nbsp;·&nbsp; 1-9 PICK BEAT &nbsp;·&nbsp; ← → SEEK</div>
+  <div id="keys">SPACE PLAY &nbsp;·&nbsp; M STYLE &nbsp;·&nbsp; T THEME &nbsp;·&nbsp; S SHUFFLE &nbsp;·&nbsp; V BACKGROUND &nbsp;·&nbsp; H HIDE UI &nbsp;·&nbsp; 1-9 PICK BEAT &nbsp;·&nbsp; ← → SEEK</div>
 </div>
 
-<audio id="audio"></audio>
-
 <script>
+  const stage = document.getElementById('stage');
   const canvas = document.getElementById('c');
   const ctx = canvas.getContext('2d');
-  const audio = document.getElementById('audio');
+  const audio = document.getElementById('audio');       // a <video> element: plays mp3 AND mp4
+  const coverEl = document.getElementById('cover');
   const playBtn = document.getElementById('play');
   const modeBtn = document.getElementById('modeBtn');
   const themeBtn = document.getElementById('themeBtn');
   const shuffleBtn = document.getElementById('shuffleBtn');
   const recBtn = document.getElementById('recBtn');
+  const fmtBtn = document.getElementById('fmtBtn');
   const seek = document.getElementById('seek');
   const volEl = document.getElementById('vol');
   const trackName = document.getElementById('track');
+  const bpmEl = document.getElementById('bpm');
   const hint = document.getElementById('hint');
   const listEl = document.getElementById('list');
   const title = document.getElementById('title');
   const glow = document.getElementById('glow');
   const presetsBtn = document.getElementById('presetsBtn');
 
-  const CY = 0.52;   // vertical center of the circle / wave / glow (title sits above it)
+  const CY = 0.52;   // vertical center of the circle / wave / tunnel / glow (title sits above it)
 
-  // ---------- canvas size (capped for speed) ----------
+  // ---------- stage + canvas size (capped for speed) ----------
+  let stageW = innerWidth, stageH = innerHeight;
   let scale = Math.min(1, 1280 / innerWidth);
   let W, H;
+
+  function isPortrait() { return document.body.classList.contains('portrait'); }
+
+  function titleSize() {
+    const base = isPortrait() ? stageW * 0.12 : Math.min(stageW, stageH) * 0.09;
+    return Math.max(34, Math.min(110, base));
+  }
+
   function resize() {
-    W = canvas.width = Math.max(320, Math.floor(innerWidth * scale));
-    H = canvas.height = Math.max(180, Math.floor(innerHeight * scale));
+    stageW = stage.clientWidth || innerWidth;
+    stageH = stage.clientHeight || innerHeight;
+    W = canvas.width = Math.max(320, Math.floor(stageW * scale));
+    H = canvas.height = Math.max(180, Math.floor(stageH * scale));
+    title.style.fontSize = titleSize() + 'px';
+    const g = 0.9 * Math.min(stageW, stageH);
+    glow.style.width = g + 'px';
+    glow.style.height = g + 'px';
+    glow.style.margin = (-g / 2) + 'px 0 0 ' + (-g / 2) + 'px';
   }
   addEventListener('resize', resize);
   resize();
 
   // ---------- visual state ----------
-  let sBass = 0, hue = 260, rot = 0;
+  let sBass = 0, hue = 260, rot = 0, pulse = 0;
+
+  const titleScale = () => 1 + sBass * 0.1 + pulse * 0.05;
+  const glowOpacity = () => Math.min(1, 0.12 + sBass * 0.7 + pulse * 0.2);
+  const glowScale = () => 0.9 + sBass * 0.35 + pulse * 0.1;
 
   // ---------- themes ----------
   const P = () => hue * Math.PI / 180;
@@ -144,9 +185,14 @@
   let index = 0;
   let shuffle = false;
   let history = [];
+  let bgOn = true;
 
-  // Preset beats that ship with the site. Put your mp3s in a "beats/" folder
-  // next to this file, then list the exact filenames here.
+  const VID_RE = /\.(mp4|webm|mov|m4v|mkv)$/i;
+  const AUD_RE = /\.(mp3|wav|ogg|m4a|flac|aac)$/i;
+  const IMG_RE = /\.(png|jpe?g|webp|gif)$/i;
+
+  // Preset beats that ship with the site. Put your files in a "beats/" folder
+  // next to this file, then list the exact filenames here. (mp3 or mp4)
   // Only YOU can change this list (it's your repo), so visitors can only play what you upload.
   const AUTO_BEATS = [
     'beats/beatjelefir.mp3',
@@ -154,21 +200,64 @@
     'beats/yeatbeat.mp3'
   ];
 
+  // Optional cover image per preset (image goes in the same repo).
+  // Example: 'beats/yeatbeat.mp3': 'beats/yeatbeat.jpg'
+  const COVERS = {
+  };
+
+  function presetTrack(p) {
+    return { name: p.split('/').pop().replace(/\.[^.]+$/, ''), url: p, video: VID_RE.test(p), cover: COVERS[p] || null };
+  }
+
   function addFiles(list) {
-    const files = Array.from(list).filter(f => f.type.startsWith('audio/') || /\.(mp3|wav|ogg|m4a|flac|aac)$/i.test(f.name));
-    if (!files.length) return;
-    const startAt = tracks.length;
-    tracks = tracks.concat(files.map(f => ({ name: f.name.replace(/\.[^.]+$/, ''), url: URL.createObjectURL(f) })));
-    hint.style.display = 'none';
-    // if something is already playing (or recording), just add to the list without interrupting
-    if (recording || (audio.getAttribute('src') && !audio.paused)) { renderList(); return; }
-    loadTrack(startAt, true);
+    const all = Array.from(list);
+    const imgs = all.filter(f => f.type.startsWith('image/') || IMG_RE.test(f.name));
+    const media = all.filter(f => f.type.startsWith('audio/') || f.type.startsWith('video/') || AUD_RE.test(f.name) || VID_RE.test(f.name));
+    if (!imgs.length && !media.length) return;
+
+    if (media.length) {
+      const startAt = tracks.length;
+      tracks = tracks.concat(media.map(f => ({
+        name: f.name.replace(/\.[^.]+$/, ''),
+        url: URL.createObjectURL(f),
+        video: f.type.startsWith('video/') || VID_RE.test(f.name),
+        cover: null
+      })));
+      hint.style.display = 'none';
+      // if something is already playing (or recording), just add to the list without interrupting
+      if (recording || (audio.getAttribute('src') && !audio.paused)) renderList();
+      else loadTrack(startAt, true);
+    }
+    if (imgs.length && tracks.length) setCover(URL.createObjectURL(imgs[0]));
   }
 
   document.getElementById('files').addEventListener('change', (e) => {
     addFiles(e.target.files);
     e.target.value = '';
   });
+  document.getElementById('coverFile').addEventListener('change', (e) => {
+    const f = e.target.files[0];
+    if (f) setCover(URL.createObjectURL(f));
+    e.target.value = '';
+  });
+
+  function setCover(url) {
+    const tr = tracks[index];
+    if (!tr) { URL.revokeObjectURL(url); alert('Load a beat first, then set its cover.'); return; }
+    if (tr.cover && tr.cover.startsWith('blob:')) URL.revokeObjectURL(tr.cover);
+    tr.cover = url;
+    applyBg();
+  }
+
+  // shows the mp4 video OR the cover image behind the visuals
+  function applyBg() {
+    const tr = tracks[index];
+    const showVideo = !!(tr && tr.video && bgOn);
+    const showCover = !!(tr && !tr.video && tr.cover && bgOn);
+    audio.classList.toggle('show', showVideo);
+    if (showCover && coverEl.getAttribute('src') !== tr.cover) coverEl.src = tr.cover;
+    coverEl.classList.toggle('show', showCover);
+  }
 
   function renderList() {
     listEl.innerHTML = '';
@@ -197,6 +286,8 @@
     index = (i + tracks.length) % tracks.length;
     audio.src = tracks[index].url;
     trackName.textContent = tracks[index].name.toUpperCase();
+    resetBeat();
+    applyBg();
     renderList();
     if (autoplay) startPlayback();
   }
@@ -208,6 +299,7 @@
     const wasCurrent = (i === index);
     const wasPlaying = !audio.paused;
     if (t.url.startsWith('blob:')) URL.revokeObjectURL(t.url);
+    if (t.cover && t.cover.startsWith('blob:')) URL.revokeObjectURL(t.cover);
     tracks.splice(i, 1);
     history = [];   // shuffle history indexes are no longer valid
 
@@ -219,6 +311,8 @@
       trackName.textContent = '';
       seek.value = 0;
       hint.style.display = '';
+      resetBeat();
+      applyBg();
       renderList();
       return;
     }
@@ -264,9 +358,7 @@
     // Re-add any preset that was removed
     const present = new Set(tracks.map(t => t.url));
     AUTO_BEATS.forEach(url => {
-      if (!present.has(url)) {
-        tracks.push({ name: url.split('/').pop().replace(/\.[^.]+$/, ''), url });
-      }
+      if (!present.has(url)) tracks.push(presetTrack(url));
     });
     presetCycle = (presetCycle + 1) % AUTO_BEATS.length;
     const target = AUTO_BEATS[presetCycle];
@@ -276,7 +368,7 @@
   presetsBtn.addEventListener('click', playPresets);
 
   if (AUTO_BEATS.length) {
-    tracks = AUTO_BEATS.map(p => ({ name: p.split('/').pop().replace(/\.[^.]+$/, ''), url: p }));
+    tracks = AUTO_BEATS.map(presetTrack);
     hint.textContent = 'PICK A BEAT TO BEGIN';
     renderList();
     console.log('[VSLZR] Loaded', AUTO_BEATS.length, 'preset(s):', AUTO_BEATS);
@@ -302,6 +394,7 @@
 
   // ---------- audio analysis ----------
   let audioCtx, analyser, gainNode, recDest, freq, wave;
+  let beatAn, beatFreq, prevBeat;
   let vol = 1;
 
   function setupAudio() {
@@ -319,8 +412,15 @@
     analyser.connect(gainNode);
     analyser.connect(recDest);
     gainNode.connect(audioCtx.destination);
+    // second, "twitchy" analyser used only to find the beat
+    beatAn = audioCtx.createAnalyser();
+    beatAn.fftSize = 512;
+    beatAn.smoothingTimeConstant = 0.1;
+    src.connect(beatAn);
     freq = new Uint8Array(analyser.frequencyBinCount);
     wave = new Uint8Array(analyser.fftSize);
+    beatFreq = new Uint8Array(beatAn.frequencyBinCount);
+    prevBeat = new Uint8Array(beatAn.frequencyBinCount);
   }
 
   function startPlayback() {
@@ -338,8 +438,102 @@
     if (audio.paused) startPlayback(); else audio.pause();
   }
 
+  // ---------- BPM / beat tracking ----------
+  const OBUF = 720;
+  const oT = new Float64Array(OBUF), oV = new Float32Array(OBUF);
+  let oPos = 0, oCount = 0, oFirstT = 0, lastBpmCalc = 0, beatPrimed = false;
+  let bpmS = 0, beatT0 = 0, beatConf = 0;
+
+  function resetBeat() {
+    oPos = 0; oCount = 0; oFirstT = 0; lastBpmCalc = 0; beatPrimed = false;
+    bpmS = 0; beatConf = 0; pulse = 0;
+    bpmEl.textContent = '';
+    if (prevBeat) prevBeat.fill(0);
+  }
+
+  function trackBeat(now) {
+    if (!beatAn) return;
+    beatAn.getByteFrequencyData(beatFreq);
+    let flux = 0;
+    for (let i = 0; i < 12; i++) {
+      const d = beatFreq[i] - prevBeat[i];
+      if (d > 0) flux += d;
+      prevBeat[i] = beatFreq[i];
+    }
+    if (!beatPrimed) { beatPrimed = true; return; }   // first sample is always a fake spike
+    if (!oCount) oFirstT = now;
+    oT[oPos] = now; oV[oPos] = flux;
+    oPos = (oPos + 1) % OBUF;
+    if (oCount < OBUF) oCount++;
+    if (now - oFirstT > 4000 && now - lastBpmCalc > 700) { lastBpmCalc = now; estimateBpm(now); }
+  }
+
+  function estimateBpm(now) {
+    const N = 300, STEP = 20, tStart = now - N * STEP;   // last 6 seconds, 50 samples per second
+    const u = new Float32Array(N);
+    for (let k = 0; k < oCount; k++) {
+      const i = (oPos - 1 - k + OBUF) % OBUF;
+      const t = oT[i];
+      if (t < tStart) break;
+      const b = Math.min(N - 1, Math.floor((t - tStart) / STEP));
+      if (oV[i] > u[b]) u[b] = oV[i];
+    }
+    let mean = 0;
+    for (let i = 0; i < N; i++) mean += u[i];
+    mean /= N;
+    const v = new Float32Array(N);
+    let r0 = 0;
+    for (let i = 0; i < N; i++) { v[i] = u[i] - mean; r0 += v[i] * v[i]; }
+    if (r0 < 1) return;
+
+    // autocorrelation: which delay makes the onset pattern match itself best?
+    const r = new Float32Array(53);
+    for (let lag = 14; lag <= 51; lag++) {
+      let s = 0;
+      for (let i = lag; i < N; i++) s += v[i] * v[i - lag];
+      r[lag] = (s / r0) * (N / (N - lag));
+    }
+    let best = 15;
+    for (let lag = 15; lag <= 50; lag++) if (r[lag] > r[best]) best = lag;
+    const a = r[best - 1], b = r[best], c = r[best + 1];
+    const den = a - 2 * b + c;
+    const lagF = den < 0 ? best + 0.5 * (a - c) / den : best;
+
+    let bpm = 3000 / lagF;
+    while (bpm < 80) bpm *= 2;
+    while (bpm > 160) bpm /= 2;
+    const conf = Math.max(0, Math.min(1, (b - 0.08) / 0.3));
+
+    if (!bpmS || Math.abs(bpm - bpmS) > bpmS * 0.15) bpmS = bpm;
+    else bpmS += (bpm - bpmS) * 0.35;
+
+    // find where the beats land (phase)
+    const Ls = 3000 / bpmS;
+    let bestOff = 0, bestScore = -1;
+    for (let off = 0; off < Math.ceil(Ls); off++) {
+      let sc = 0;
+      for (let p = off; p < N; p += Ls) {
+        const i = Math.round(p);
+        sc += Math.max(u[i - 1] || 0, u[i] || 0, u[i + 1] || 0);
+      }
+      if (sc > bestScore) { bestScore = sc; bestOff = off; }
+    }
+    const kLast = Math.floor((N - 1 - bestOff) / Ls);
+    beatT0 = tStart + (bestOff + kLast * Ls) * STEP;
+
+    beatConf = beatConf ? beatConf + (conf - beatConf) * 0.4 : conf;
+    bpmEl.textContent = beatConf > 0.15 ? Math.round(bpmS) + ' BPM' : '';
+  }
+
+  function updatePulse(now) {
+    if (audio.paused || !bpmS || beatConf < 0.12) { pulse *= 0.9; return; }
+    const T = 60000 / bpmS;
+    const ph = (((now - beatT0) % T) + T) % T / T;
+    pulse = Math.pow(1 - ph, 2.5) * Math.min(1, beatConf * 1.5);
+  }
+
   // ---------- recording ----------
-  const RW = 1280, RH = 720;
+  let RW = 1280, RH = 720;
   const rec = document.createElement('canvas');
   rec.width = RW; rec.height = RH;
   const rctx = rec.getContext('2d');
@@ -357,6 +551,11 @@
     audioCtx.resume();
     if (!audio.getAttribute('src')) audio.src = tracks[index].url;
     trackName.textContent = tracks[index].name.toUpperCase();
+
+    // recording size follows the format button (16:9 or 9:16)
+    RW = isPortrait() ? 720 : 1280;
+    RH = isPortrait() ? 1280 : 720;
+    rec.width = RW; rec.height = RH;
 
     const stream = rec.captureStream(30);
     recDest.stream.getAudioTracks().forEach(t => stream.addTrack(t));
@@ -390,7 +589,7 @@
     const base = (recName || '').replace(/[^\w\- ]+/g, '').trim() || 'beat';
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = base + ' - VSLZR.webm';
+    a.download = base + ' - VSLZR' + (RH > RW ? ' (9x16)' : '') + '.webm';
     document.body.appendChild(a);
     a.click();
     a.remove();
@@ -401,7 +600,28 @@
 
   recBtn.addEventListener('click', () => { if (recording) stopRecording(); else startRecording(); });
 
-  // draws one 1280x720 frame: background + glow + visuals + title (the page's buttons are NOT included)
+  // draws a video/image so it fills the whole box (like CSS object-fit: cover)
+  function drawCoverFit(c, el, sw, sh, dx, dy, dw, dh, alpha) {
+    const sr = sw / sh, dr = dw / dh;
+    let cw = sw, ch = sh, cx = 0, cy = 0;
+    if (sr > dr) { cw = sh * dr; cx = (sw - cw) / 2; }
+    else { ch = sw / dr; cy = (sh - ch) / 2; }
+    c.globalAlpha = alpha;
+    c.drawImage(el, cx, cy, cw, ch, dx, dy, dw, dh);
+    c.globalAlpha = 1;
+  }
+
+  function drawRecBg() {
+    const tr = tracks[index];
+    if (!bgOn || !tr) return;
+    if (tr.video && audio.videoWidth) {
+      drawCoverFit(rctx, audio, audio.videoWidth, audio.videoHeight, 0, 0, RW, RH, 0.42);
+    } else if (!tr.video && tr.cover && coverEl.complete && coverEl.naturalWidth) {
+      drawCoverFit(rctx, coverEl, coverEl.naturalWidth, coverEl.naturalHeight, 0, 0, RW, RH, 0.42);
+    }
+  }
+
+  // draws one frame: background + glow + visuals + title (the page's buttons are NOT included)
   function drawRecFrame(now) {
     if (now - lastRecDraw < 33) return;
     lastRecDraw = now;
@@ -410,17 +630,19 @@
     rctx.fillStyle = '#050507';
     rctx.fillRect(0, 0, RW, RH);
 
+    drawRecBg();
+
     const s = Math.min(RW / canvas.width, RH / canvas.height);
     const dw = canvas.width * s, dh = canvas.height * s;
     const dx = (RW - dw) / 2, dy = (RH - dh) / 2;
 
     // glow
     const gx = RW / 2, gy = dy + dh * CY;
-    const Rg = 0.45 * Math.min(dw, dh) * 1.414 * (0.9 + sBass * 0.35);
+    const Rg = 0.45 * Math.min(dw, dh) * 1.414 * glowScale();
     const g = rctx.createRadialGradient(gx, gy, 0, gx, gy, Rg);
     g.addColorStop(0, `rgba(${th.glow},.55)`);
     g.addColorStop(0.65, `rgba(${th.glow},0)`);
-    rctx.globalAlpha = Math.min(1, 0.12 + sBass * 0.7);
+    rctx.globalAlpha = glowOpacity();
     rctx.fillStyle = g;
     rctx.fillRect(0, 0, RW, RH);
     rctx.globalAlpha = 1;
@@ -429,11 +651,11 @@
     rctx.drawImage(canvas, dx, dy, dw, dh);
 
     // title (same look as the page: bold, gradient, glow)
-    const k = dw / innerWidth;
-    const fs = Math.max(34, Math.min(110, 0.09 * Math.min(innerWidth, innerHeight))) * k;
+    const k = dw / stageW;
+    const fs = titleSize() * k;
     const ls = 0.22 * fs;
     const ty = dy + dh * 0.09;
-    const sc = 1 + sBass * 0.1;
+    const sc = titleScale();
     rctx.save();
     rctx.translate(RW / 2 + ls / 2, ty);
     rctx.scale(sc, sc);
@@ -466,8 +688,18 @@
     if (gainNode) gainNode.gain.value = vol;
   });
 
+  // 16:9 / 9:16
+  fmtBtn.addEventListener('click', () => {
+    if (recording) return;
+    document.body.classList.toggle('portrait');
+    fmtBtn.textContent = isPortrait() ? '9:16' : '16:9';
+    resize();
+    ctx.clearRect(0, 0, W, H);
+  });
+
   audio.addEventListener('play', () => playBtn.textContent = 'Pause');
   audio.addEventListener('pause', () => playBtn.textContent = 'Play');
+  audio.addEventListener('seeked', resetBeat);
   audio.addEventListener('error', () => {
     const e = audio.error;
     if (!e) return;
@@ -497,7 +729,7 @@
   });
 
   // modes (bars first = default)
-  const MODES = ['bars', 'wave', 'circle'];
+  const MODES = ['bars', 'wave', 'circle', 'tunnel'];
   let mode = 0;
   function setMode(i) {
     mode = i % MODES.length;
@@ -513,6 +745,7 @@
     else if (e.key === 'm' || e.key === 'M') setMode(mode + 1);
     else if (e.key === 't' || e.key === 'T') applyTheme(themeIdx + 1);
     else if (e.key === 's' || e.key === 'S') toggleShuffle();
+    else if (e.key === 'v' || e.key === 'V') { bgOn = !bgOn; applyBg(); }
     else if (e.key === 'h' || e.key === 'H') document.body.classList.toggle('clean');
     else if (e.key >= '1' && e.key <= '9' && tracks[Number(e.key) - 1]) loadTrack(Number(e.key) - 1, true);
     else if (e.code === 'ArrowRight' && tracks.length && !recording) audio.currentTime = Math.min(audio.duration || 0, audio.currentTime + 5);
@@ -563,12 +796,13 @@
 
   function drawBars() {
     const base = H * 0.74, bw = W / (BN * 2), usable = freq.length * 0.5;
+    const boost = 1 + pulse * 0.08;
     for (let i = 0; i < BN; i++) {
       const v = freq[Math.floor(i / BN * usable)] / 255;
       barH[i] = Math.max(v, barH[i] * 0.92);                 // rise fast, fall smooth
       peaks[i] = Math.max(barH[i], peaks[i] - 0.006);         // peak cap drops slowly
-      const h = barH[i] * H * 0.48 + 2;
-      const ph = peaks[i] * H * 0.48 + 4;
+      const h = barH[i] * H * 0.48 * boost + 2;
+      const ph = peaks[i] * H * 0.48 * boost + 4;
       const off = i * 2.5;
       const xr = W / 2 + i * bw;
       const xl = W / 2 - (i + 1) * bw;
@@ -590,7 +824,7 @@
   // ----- WAVE -----
   function drawWave() {
     analyser.getByteTimeDomainData(wave);
-    const u = Math.min(W, H), cy = H * CY, amp = u * 0.24 * (1 + sBass * 0.3);
+    const u = Math.min(W, H), cy = H * CY, amp = u * 0.24 * (1 + sBass * 0.3 + pulse * 0.1);
     const n = 256, step = wave.length / n;
     ctx.lineJoin = 'round';
     for (let pass = 0; pass < 2; pass++) {
@@ -616,7 +850,7 @@
   function drawCircle() {
     analyser.getByteTimeDomainData(wave);
     const cx = W / 2, cy = H * CY, u = Math.min(W, H);
-    const r = u * 0.15 * (1 + sBass * 0.18);
+    const r = u * 0.15 * (1 + sBass * 0.18 + pulse * 0.05);
     rot += 0.003 + sBass * 0.012;
 
     const bars = 96, half = 48, usable = freq.length * 0.55;
@@ -674,6 +908,58 @@
     }
   }
 
+  // ----- TUNNEL (mirrored rings rushing at you, warped by the frequencies) -----
+  const TN = 14;
+  const tz = new Float32Array(TN);
+  for (let i = 0; i < TN; i++) tz[i] = i / TN;
+  let trot = 0;
+
+  function drawTunnel() {
+    const cx = W / 2, cy = H * CY, u = Math.min(W, H);
+    const speed = 0.0035 + sBass * 0.02 + pulse * 0.006;
+    const maxR = Math.hypot(W, H) * 0.55;
+    const verts = 64, half = 32, usable = freq.length * 0.45;
+    trot += 0.002 + sBass * 0.004;
+
+    // spectrum value for each half of the ring (mirrored left/right)
+    const vs = new Float32Array(half + 1);
+    for (let j = 0; j <= half; j++) vs[j] = freq[Math.floor(j / half * usable)] / 255;
+
+    ctx.lineJoin = 'round';
+    for (let i = 0; i < TN; i++) {
+      tz[i] += speed;
+      if (tz[i] > 1) tz[i] -= 1;
+      const z = tz[i];
+      const r = maxR * Math.pow(z, 2.2);
+      if (r < 2) continue;
+      const fade = Math.min(1, z / 0.15) * (1 - Math.max(0, (z - 0.85) / 0.15));
+
+      ctx.beginPath();
+      for (let k = 0; k <= verts; k++) {
+        const kk = k % verts;
+        const j = kk <= half ? kk : verts - kk;
+        const a = (kk / verts) * Math.PI * 2 - Math.PI / 2 + trot;
+        const rr = r * (1 + vs[j] * 0.35 * z + pulse * 0.04);
+        const x = cx + Math.cos(a) * rr;
+        const y = cy + Math.sin(a) * rr;
+        if (k) ctx.lineTo(x, y); else ctx.moveTo(x, y);
+      }
+      ctx.closePath();
+      ctx.strokeStyle = col(z * 120 + i * 8, 55, 0.14 * fade);
+      ctx.lineWidth = u * 0.006 + z * u * 0.03;
+      ctx.stroke();
+      ctx.strokeStyle = col(z * 120 + i * 8, 75, 0.85 * fade);
+      ctx.lineWidth = u * 0.0015 + z * u * 0.007;
+      ctx.stroke();
+    }
+
+    // glowing vanishing point in the middle
+    ctx.fillStyle = col(0, 70, 0.25 + sBass * 0.4 + pulse * 0.2);
+    ctx.beginPath();
+    ctx.arc(cx, cy, u * 0.012 * (1 + sBass * 2 + pulse), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // ---------- auto quality ----------
   let fCount = 0, fLast = performance.now();
   function checkPerf() {
@@ -688,14 +974,16 @@
   function draw() {
     requestAnimationFrame(draw);
 
-    // fade old frame toward transparent (gives trails, keeps glow visible)
+    // fade old frame toward transparent (gives trails, keeps glow and background visible)
     ctx.globalCompositeOperation = 'destination-out';
     ctx.fillStyle = 'rgba(0,0,0,0.28)';
     ctx.fillRect(0, 0, W, H);
     ctx.globalCompositeOperation = 'lighter';
 
     if (!analyser) return;
-    if (!audio.paused) checkPerf();
+    const now = performance.now();
+    if (!audio.paused) { checkPerf(); trackBeat(now); }
+    updatePulse(now);
 
     analyser.getByteFrequencyData(freq);
 
@@ -707,13 +995,14 @@
 
     if (mode === 0) drawBars();
     else if (mode === 1) drawWave();
-    else drawCircle();
+    else if (mode === 2) drawCircle();
+    else drawTunnel();
 
-    if (recording) drawRecFrame(performance.now());
+    if (recording) drawRecFrame(now);
 
-    title.style.transform = `translate(-50%,-50%) scale(${1 + sBass * 0.1})`;
-    glow.style.opacity = 0.12 + sBass * 0.7;
-    glow.style.transform = `scale(${0.9 + sBass * 0.35})`;
+    title.style.transform = `translate(-50%,-50%) scale(${titleScale()})`;
+    glow.style.opacity = glowOpacity();
+    glow.style.transform = `scale(${glowScale()})`;
   }
 
   applyTheme(0);
